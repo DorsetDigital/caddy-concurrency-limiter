@@ -1,9 +1,9 @@
 package concurrencylimiter
 
 import (
-	"net/http"
 	"context"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"sync"
 	"sync/atomic"
