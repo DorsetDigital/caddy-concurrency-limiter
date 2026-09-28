@@ -83,14 +83,14 @@ func (h *Handler) Validate() error {
 
 // ServeHTTP implements caddyhttp.MiddlewareHandler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	if !h.acquire() {
+	acquired, active := h.acquire()\n\tif !acquired {
 		if h.logger != nil {
 			h.logger.Warn("concurrency limit exceeded",
 				zap.String("host", r.Host),
 				zap.String("method", r.Method),
 				zap.String("path", r.URL.Path),
 				zap.Int64("limit", h.MaxConcurrent),
-				zap.Int64("active", h.active.Load()),
+				zap.Int64("active", active),
 			)
 		}
 
@@ -108,14 +108,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 
 // acquire reserves one concurrency slot without allowing the counter to
 // transiently exceed the configured maximum.
-func (h *Handler) acquire() bool {
+func (h *Handler) acquire() (bool, int64) {
 	for {
 		current := h.active.Load()
 		if current >= h.MaxConcurrent {
-			return false
+			return false, current
 		}
 		if h.active.CompareAndSwap(current, current+1) {
-			return true
+			return true, current + 1
 		}
 	}
 }
