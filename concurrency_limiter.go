@@ -39,9 +39,8 @@ type Handler struct {
 	// header. Defaults to 0.
 	RetryAfter int `json:"retry_after,omitempty"`
 
-	logger   *zap.Logger
-	active   atomic.Int64
-	rejected atomic.Uint64
+	logger *zap.Logger
+	active atomic.Int64
 }
 
 // CaddyModule returns the Caddy module information.
@@ -85,8 +84,6 @@ func (h *Handler) Validate() error {
 // ServeHTTP implements caddyhttp.MiddlewareHandler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	if !h.acquire() {
-		h.rejected.Add(1)
-
 		if h.logger != nil {
 			h.logger.Warn("concurrency limit exceeded",
 				zap.String("host", r.Host),
