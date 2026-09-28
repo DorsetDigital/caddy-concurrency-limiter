@@ -219,7 +219,7 @@ func TestAcquireDoesNotOvershootLimit(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			if h.acquire() {
+			if acquired, _ := h.acquire(); acquired {
 				admitted.Add(1)
 			}
 		}()
