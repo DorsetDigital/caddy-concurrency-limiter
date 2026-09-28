@@ -75,6 +75,10 @@ func (h *Handler) Validate() error {
 		return errors.New("retry_after must be zero or greater")
 	}
 
+	if h.RetryAfter > 0 && h.StatusCode != http.StatusServiceUnavailable && h.StatusCode != http.StatusTooManyRequests {
+		return errors.New("retry_after is only supported with status_code 429 or 503")
+	}
+
 	return nil
 }
 
@@ -132,12 +136,14 @@ func (h *Handler) acquire() bool {
 func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	d.Next()
 
+	maxSet := false
 	if d.NextArg() {
 		max, err := strconv.ParseInt(d.Val(), 10, 64)
 		if err != nil {
 			return d.Errf("invalid concurrency limit %q: %v", d.Val(), err)
 		}
 		h.MaxConcurrent = max
+		maxSet = true
 
 		if d.NextArg() {
 			return d.ArgErr()
@@ -147,6 +153,9 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	for nesting := d.Nesting(); d.NextBlock(nesting); {
 		switch d.Val() {
 		case "max":
+			if maxSet {
+				return d.Err("concurrency limit max may only be specified once")
+			}
 			if !d.NextArg() {
 				return d.ArgErr()
 			}
@@ -155,6 +164,7 @@ func (h *Handler) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				return d.Errf("invalid max value %q: %v", d.Val(), err)
 			}
 			h.MaxConcurrent = max
+			maxSet = true
 			if d.NextArg() {
 				return d.ArgErr()
 			}
