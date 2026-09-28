@@ -31,6 +31,8 @@ func TestValidate(t *testing.T) {
 		{"invalid low status", Handler{MaxConcurrent: 1, StatusCode: 399}, true},
 		{"invalid high status", Handler{MaxConcurrent: 1, StatusCode: 600}, true},
 		{"negative retry", Handler{MaxConcurrent: 1, StatusCode: http.StatusServiceUnavailable, RetryAfter: -1}, true},
+		{"retry with unsupported status", Handler{MaxConcurrent: 1, StatusCode: http.StatusBadGateway, RetryAfter: 1}, true},
+		{"retry with 429", Handler{MaxConcurrent: 1, StatusCode: http.StatusTooManyRequests, RetryAfter: 1}, false},
 	}
 
 	for _, tt := range tests {
@@ -199,6 +201,7 @@ func TestCaddyfileUnmarshal(t *testing.T) {
 		{"missing max", "concurrency_limit {\n status_code 503\n}", 0, 0, 0, true},
 		{"invalid max", "concurrency_limit nope", 0, 0, 0, true},
 		{"extra argument", "concurrency_limit 10 extra", 0, 0, 0, true},
+		{"duplicate max", "concurrency_limit 10 {\n max 20\n}", 0, 0, 0, true},
 		{"unknown option", "concurrency_limit {\n nope 1\n}", 0, 0, 0, true},
 	}
 
