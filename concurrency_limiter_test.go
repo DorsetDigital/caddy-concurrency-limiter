@@ -2,6 +2,7 @@ package concurrencylimiter
 
 import (
 	"net/http"
+	"context"
 	"errors"
 	"net/http/httptest"
 	"sync"
@@ -152,6 +153,54 @@ func TestNeverExceedsConfiguredConcurrency(t *testing.T) {
 
 	if got := peak.Load(); got > limit {
 		t.Fatalf("peak concurrency = %d, limit = %d", got, limit)
+	}
+}
+
+func TestCounterReleasedAfterPanic(t *testing.T) {
+	h := &Handler{MaxConcurrent: 1, StatusCode: http.StatusServiceUnavailable}
+
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected downstream panic")
+			}
+		}()
+
+		req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+		_ = h.ServeHTTP(httptest.NewRecorder(), req, handlerFunc(func(http.ResponseWriter, *http.Request) error {
+			panic("boom")
+		}))
+	}()
+
+	if got := h.active.Load(); got != 0 {
+		t.Fatalf("active after panic = %d, want 0", got)
+	}
+}
+
+func TestCounterReleasedAfterCancellation(t *testing.T) {
+	h := &Handler{MaxConcurrent: 1, StatusCode: http.StatusServiceUnavailable}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	entered := make(chan struct{})
+	done := make(chan error, 1)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil).WithContext(ctx)
+	go func() {
+		done <- h.ServeHTTP(httptest.NewRecorder(), req, handlerFunc(func(http.ResponseWriter, *http.Request) error {
+			close(entered)
+			<-ctx.Done()
+			return ctx.Err()
+		}))
+	}()
+
+	<-entered
+	cancel()
+
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("downstream error = %v, want context.Canceled", err)
+	}
+	if got := h.active.Load(); got != 0 {
+		t.Fatalf("active after cancellation = %d, want 0", got)
 	}
 }
 
