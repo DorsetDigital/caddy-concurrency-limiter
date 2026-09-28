@@ -2,12 +2,14 @@ package concurrencylimiter
 
 import (
 	"net/http"
+	"errors"
 	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 )
 
@@ -151,17 +153,74 @@ func TestNeverExceedsConfiguredConcurrency(t *testing.T) {
 	}
 }
 
-// errorAs is kept local so the test file does not need to obscure the test
-// intent with repetitive boilerplate.
-func errorAs(err error, target any) bool {
-	switch t := target.(type) {
-	case *caddyhttp.HandlerError:
-		handlerErr, ok := err.(caddyhttp.HandlerError)
-		if ok {
-			*t = handlerErr
-		}
-		return ok
-	default:
-		panic("unsupported target type")
+func TestAcquireDoesNotOvershootLimit(t *testing.T) {
+	const limit = int64(8)
+	const attempts = 100
+
+	h := &Handler{MaxConcurrent: limit}
+
+	var admitted atomic.Int64
+	var wg sync.WaitGroup
+	wg.Add(attempts)
+
+	start := make(chan struct{})
+	for range attempts {
+		go func() {
+			defer wg.Done()
+			<-start
+			if h.acquire() {
+				admitted.Add(1)
+			}
+		}()
 	}
+
+	close(start)
+	wg.Wait()
+
+	if got := admitted.Load(); got != limit {
+		t.Fatalf("admitted = %d, want %d", got, limit)
+	}
+	if got := h.active.Load(); got != limit {
+		t.Fatalf("active = %d, want %d", got, limit)
+	}
+}
+
+func TestCaddyfileUnmarshal(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantMax    int64
+		wantStatus int
+		wantRetry  int
+		wantErr    bool
+	}{
+		{"short form", "concurrency_limit 10", 10, 0, 0, false},
+		{"block form", "concurrency_limit {\n max 12\n status_code 429\n retry_after 3\n}", 12, 429, 3, false},
+		{"missing max", "concurrency_limit {\n status_code 503\n}", 0, 0, 0, true},
+		{"invalid max", "concurrency_limit nope", 0, 0, 0, true},
+		{"extra argument", "concurrency_limit 10 extra", 0, 0, 0, true},
+		{"unknown option", "concurrency_limit {\n nope 1\n}", 0, 0, 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var h Handler
+			d := caddyfile.NewTestDispenser(tt.input)
+			err := h.UnmarshalCaddyfile(d)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("UnmarshalCaddyfile() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if h.MaxConcurrent != tt.wantMax || h.StatusCode != tt.wantStatus || h.RetryAfter != tt.wantRetry {
+				t.Fatalf("got max=%d status=%d retry=%d; want max=%d status=%d retry=%d",
+					h.MaxConcurrent, h.StatusCode, h.RetryAfter, tt.wantMax, tt.wantStatus, tt.wantRetry)
+			}
+		})
+	}
+}
+
+func errorAs(err error, target any) bool {
+	return errors.As(err, target)
 }
