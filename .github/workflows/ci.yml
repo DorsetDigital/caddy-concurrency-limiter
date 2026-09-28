@@ -16,10 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Download dependencies
+        run: go mod download
 
       - name: Format check
         run: test -z "$(gofmt -l .)"
@@ -27,5 +30,31 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test
+      - name: Test with race detector
         run: go test -race ./...
+
+      - name: Build package
+        run: go build ./...
+
+      - name: Install xcaddy
+        run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.7
+
+      - name: Build Caddy with module
+        run: xcaddy build v2.10.2 --with github.com/DorsetDigital/caddy-concurrency-limiter=.
+
+  vulnerability-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Scan
+        run: govulncheck ./...
