@@ -40,7 +40,7 @@ jobs:
         run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.7
 
       - name: Build Caddy with module
-        run: xcaddy build v2.10.2 --with github.com/DorsetDigital/caddy-concurrency-limiter=.
+        run: xcaddy build v2.11.4 --with github.com/DorsetDigital/caddy-concurrency-limiter=.
 
   vulnerability-scan:
     runs-on: ubuntu-latest
