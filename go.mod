@@ -1,8 +1,8 @@
 module github.com/DorsetDigital/caddy-concurrency-limiter
 
-go 1.25
+go 1.25.1
 
 require (
-	github.com/caddyserver/caddy/v2 v2.10.2
-	go.uber.org/zap v1.27.0
+	github.com/caddyserver/caddy/v2 v2.11.4
+	go.uber.org/zap v1.28.0
 )
