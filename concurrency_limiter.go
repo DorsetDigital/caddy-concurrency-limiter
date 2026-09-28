@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"sync/atomic"
 
+	"go.uber.org/zap"
+
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
@@ -37,6 +39,7 @@ type Handler struct {
 	// header. Defaults to 0.
 	RetryAfter int `json:"retry_after,omitempty"`
 
+	logger   *zap.Logger
 	active   atomic.Int64
 	rejected atomic.Uint64
 }
@@ -50,7 +53,8 @@ func (Handler) CaddyModule() caddy.ModuleInfo {
 }
 
 // Provision applies defaults.
-func (h *Handler) Provision(_ caddy.Context) error {
+func (h *Handler) Provision(ctx caddy.Context) error {
+	h.logger = ctx.Logger(h)
 	if h.StatusCode == 0 {
 		h.StatusCode = http.StatusServiceUnavailable
 	}
@@ -80,6 +84,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	if current > h.MaxConcurrent {
 		h.active.Add(-1)
 		h.rejected.Add(1)
+
+		if h.logger != nil {
+			h.logger.Warn("concurrency limit exceeded",
+				zap.String("host", r.Host),
+				zap.String("method", r.Method),
+				zap.String("uri", r.URL.RequestURI()),
+				zap.String("remote_ip", r.RemoteAddr),
+				zap.Int64("limit", h.MaxConcurrent),
+				zap.Int64("active", h.MaxConcurrent),
+			)
+		}
 
 		if h.RetryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(h.RetryAfter))
