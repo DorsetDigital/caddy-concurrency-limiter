@@ -130,8 +130,10 @@ xcaddy build \
 - Handler-local counters for predictable isolation between independently
   configured sites/routes.
 - No distributed lock or datastore in the request path.
-- Counters are released with `defer`, including when downstream handlers
-  return an error.
+- Slots are acquired with an atomic compare-and-swap operation, so the active
+  counter does not overshoot the configured maximum.
+- Slots are released with `defer`, including when downstream handlers return
+  an error or unwind through a panic.
 - Invalid limits and response codes are rejected at configuration validation.
 
 ## Security notes
