@@ -76,19 +76,18 @@ from ordinary upstream 503 responses in structured log analysis:
   "msg": "concurrency limit exceeded",
   "host": "example.com",
   "method": "GET",
-  "uri": "/expensive/page",
-  "remote_ip": "192.0.2.1:12345",
+  "path": "/expensive/page",
   "limit": 10,
   "active": 10
 }
 ```
 
-The normal Caddy access log still records the resulting HTTP status. The
+Query strings and client IP addresses are deliberately not included in this module's rejection event, reducing the chance of credentials, tokens, personal data, or misleading proxy-derived addresses being duplicated into operational logs.\n\nThe normal Caddy access log still records the resulting HTTP status. The
 dedicated logger/message and structured fields identify responses caused by
 this module, allowing them to be separated from genuine origin/backend errors
 in systems such as Athena.
 
-Counters are intentionally process-local. In a multi-node Caddy deployment,
+Counters are intentionally process-local. During a graceful Caddy configuration\nreload, requests already executing in the old configuration may overlap briefly\nwith requests admitted by the newly provisioned limiter. The configured value\nshould therefore be treated as an operational concurrency guard, not as a\ndistributed or reload-atomic quota.\n\nIn a multi-node Caddy deployment,
 the configured limit applies independently on each Caddy instance. This keeps
 the request path free of distributed locks or external datastore dependencies.
 
