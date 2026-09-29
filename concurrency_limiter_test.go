@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"sync/atomic"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,6 +87,97 @@ func TestConcurrencyLimitRejectsExcessRequest(t *testing.T) {
 	close(release)
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first request returned error: %v", err)
+	}
+}
+
+func TestRejectedBrowserRequestGetsFriendlyHTML(t *testing.T) {
+	h := &Handler{MaxConcurrent: 1, StatusCode: http.StatusServiceUnavailable, RetryAfter: 5}
+	h.active.Store(1)
+
+	var downstreamCalled atomic.Bool
+	next := handlerFunc(func(http.ResponseWriter, *http.Request) error {
+		downstreamCalled.Store(true)
+		return nil
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8")
+
+	err := h.ServeHTTP(rec, req, next)
+	if err != nil {
+		t.Fatalf("ServeHTTP() error = %v, want nil for rendered HTML response", err)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "5" {
+		t.Fatalf("Retry-After = %q, want 5", got)
+	}
+	if !strings.Contains(rec.Body.String(), "exceptional volume of traffic") {
+		t.Fatalf("friendly response body missing expected message: %q", rec.Body.String())
+	}
+	if downstreamCalled.Load() {
+		t.Fatal("downstream handler was called for rejected request")
+	}
+}
+
+func TestRejectedAPIRequestDoesNotGetHTML(t *testing.T) {
+	h := &Handler{MaxConcurrent: 1, StatusCode: http.StatusServiceUnavailable}
+	h.active.Store(1)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/api", nil)
+	req.Header.Set("Accept", "application/json")
+
+	err := h.ServeHTTP(rec, req, handlerFunc(func(http.ResponseWriter, *http.Request) error {
+		t.Fatal("downstream handler was called for rejected request")
+		return nil
+	}))
+
+	var handlerErr caddyhttp.HandlerError
+	if !errors.As(err, &handlerErr) {
+		t.Fatalf("expected caddyhttp.HandlerError, got %T (%v)", err, err)
+	}
+	if handlerErr.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", handlerErr.StatusCode, http.StatusServiceUnavailable)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "" {
+		t.Fatalf("unexpected Content-Type %q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+}
+
+func TestAcceptsHTML(t *testing.T) {
+	tests := []struct {
+		accept string
+		want   bool
+	}{
+		{"text/html", true},
+		{"text/html; charset=utf-8", true},
+		{"application/xhtml+xml", true},
+		{"text/html,application/xhtml+xml;q=0.9,*/*;q=0.8", true},
+		{"application/json", false},
+		{"*/*", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+		if tt.accept != "" {
+			req.Header.Set("Accept", tt.accept)
+		}
+		if got := acceptsHTML(req); got != tt.want {
+			t.Errorf("acceptsHTML(%q) = %v, want %v", tt.accept, got, tt.want)
+		}
 	}
 }
 
