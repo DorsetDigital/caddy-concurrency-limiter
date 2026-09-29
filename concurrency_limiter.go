@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"strconv"
 	"sync/atomic"
 
@@ -14,6 +15,32 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 )
+
+const busyPage = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>This website is temporarily busy</title>
+<style>
+html{color-scheme:light dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f5f5;color:#222}
+main{box-sizing:border-box;width:min(42rem,calc(100% - 2rem));padding:2.5rem;background:#fff;border-radius:.5rem;box-shadow:0 .25rem 1.5rem rgba(0,0,0,.08)}
+h1{margin-top:0;font-size:clamp(1.6rem,4vw,2.25rem);line-height:1.15}
+p{font-size:1.05rem;line-height:1.6}
+@media(prefers-color-scheme:dark){body{background:#181818;color:#eee}main{background:#242424;box-shadow:none}}
+</style>
+</head>
+<body>
+<main>
+<h1>This website is temporarily busy</h1>
+<p>The website is currently receiving an exceptional volume of traffic.</p>
+<p>Please wait a few moments and try again.</p>
+<p>If the problem continues, please contact the website owner.</p>
+</main>
+</body>
+</html>
+`
 
 func init() {
 	caddy.RegisterModule(Handler{})
@@ -99,12 +126,36 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			w.Header().Set("Retry-After", strconv.Itoa(h.RetryAfter))
 		}
 
+		w.Header().Set("Cache-Control", "no-store")
+		if acceptsHTML(r) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(h.StatusCode)
+			_, _ = w.Write([]byte(busyPage))
+			return nil
+		}
+
 		return caddyhttp.Error(h.StatusCode, nil)
 	}
 
 	defer h.active.Add(-1)
 
 	return next.ServeHTTP(w, r)
+}
+
+func acceptsHTML(r *http.Request) bool {
+	accept := r.Header.Get("Accept")
+	if accept == "" {
+		return false
+	}
+
+	for _, value := range strings.Split(accept, ",") {
+		mediaType := strings.TrimSpace(strings.SplitN(value, ";", 2)[0])
+		if mediaType == "text/html" || mediaType == "application/xhtml+xml" {
+			return true
+		}
+	}
+
+	return false
 }
 
 // acquire reserves one concurrency slot without allowing the counter to
